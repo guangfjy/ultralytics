@@ -530,7 +530,9 @@ class ConfusionMatrix(DataExportMixin):
         btm = max(0.1, 0.25 - 0.001 * nc)  # Minimum value is 0.1
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
-            im = ax.imshow(array, cmap="Blues", vmin=0.0, interpolation="none")
+            cmap = plt.cm.Blues.copy()
+            cmap.set_bad(color="#f7f7f7")  # set background color for nan
+            im = ax.imshow(array, cmap=cmap, vmin=0.0, interpolation="none")
             ax.xaxis.set_label_position("bottom")
             if nc < 30:  # Add score for each cell of confusion matrix
                 color_threshold = 0.45 * (1 if normalize else np.nanmax(array))  # text color threshold
