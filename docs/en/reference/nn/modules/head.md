@@ -43,6 +43,10 @@ keywords: Ultralytics, YOLO, Detection, Pose, RTDETRDecoder, nn modules, guides
 
 <br><br><hr><br>
 
+## ::: ultralytics.nn.modules.head.MultiLabelClassify
+
+<br><br><hr><br>
+
 ## ::: ultralytics.nn.modules.head.WorldDetect
 
 <br><br><hr><br>

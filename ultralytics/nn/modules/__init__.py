@@ -80,6 +80,7 @@ from .head import (
     OBB,
     OBB26,
     Classify,
+    MultiLabelClassify,
     Detect,
     LRPCHead,
     Pose,
@@ -187,4 +188,5 @@ __all__ = (
     "YOLOESegment",
     "YOLOESegment26",
     "v10Detect",
+    "MultiLabelClassify",
 )

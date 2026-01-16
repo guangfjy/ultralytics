@@ -55,6 +55,7 @@ from ultralytics.nn.modules import (
     ImagePoolingAttn,
     Index,
     LRPCHead,
+    MultiLabelClassify,
     Pose,
     Pose26,
     RepC3,
@@ -80,6 +81,7 @@ from ultralytics.utils.loss import (
     PoseLoss26,
     v8ClassificationLoss,
     v8DetectionLoss,
+    v8MultiLabelClassificationLoss,
     v8OBBLoss,
     v8PoseLoss,
     v8SegmentationLoss,
@@ -663,7 +665,7 @@ class ClassificationModel(BaseModel):
             verbose (bool): Whether to display model information.
         """
         self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
-
+        self.multi_label = self.yaml["multi_label"] if "multi_label" in self.yaml else False
         # Define model
         ch = self.yaml["channels"] = self.yaml.get("channels", ch)  # input channels
         if nc and nc != self.yaml["nc"]:
@@ -685,7 +687,7 @@ class ClassificationModel(BaseModel):
             nc (int): New number of classes.
         """
         name, m = list((model.model if hasattr(model, "model") else model).named_children())[-1]  # last module
-        if isinstance(m, Classify):  # YOLO Classify() head
+        if isinstance(m, Classify) or isinstance(m, MultiLabelClassify):  # YOLO Classify() head
             if m.linear.out_features != nc:
                 m.linear = torch.nn.Linear(m.linear.in_features, nc)
         elif isinstance(m, torch.nn.Linear):  # ResNet, EfficientNet
@@ -705,8 +707,15 @@ class ClassificationModel(BaseModel):
                     )
 
     def init_criterion(self):
-        """Initialize the loss criterion for the ClassificationModel."""
-        return v8ClassificationLoss()
+        """Initialize the loss criterion for the ClassificationModel.
+        Assumes the default task is standard classification.
+        """
+        if self.multi_label:
+            LOGGER.info(f"{colorstr('Multi Label Classification Loss')} ")
+            return v8MultiLabelClassificationLoss()
+        else:
+            LOGGER.info(f"{colorstr('Classification Loss')} ")
+            return v8ClassificationLoss()
 
 
 class RTDETRDetectionModel(DetectionModel):
@@ -1567,6 +1576,7 @@ def parse_model(d, ch, verbose=True):
     base_modules = frozenset(
         {
             Classify,
+            MultiLabelClassify,
             Conv,
             ConvTranspose,
             GhostConv,
@@ -1768,7 +1778,7 @@ def guess_model_task(model):
         model (torch.nn.Module | dict): PyTorch model or model configuration in YAML format.
 
     Returns:
-        (str): Task of the model ('detect', 'segment', 'classify', 'pose', 'obb').
+        (str): Task of the model ('detect', 'segment', 'classify', 'multi_label_classify', 'pose', 'obb').
     """
 
     def cfg2task(cfg):
@@ -1776,6 +1786,8 @@ def guess_model_task(model):
         m = cfg["head"][-1][-2].lower()  # output module name
         if m in {"classify", "classifier", "cls", "fc"}:
             return "classify"
+        if "multilabelclassify" in m:
+            return "multi_label_classify"
         if "detect" in m:
             return "detect"
         if "segment" in m:
@@ -1802,6 +1814,8 @@ def guess_model_task(model):
                 return "segment"
             elif isinstance(m, Classify):
                 return "classify"
+            elif isinstance(m, MultiLabelClassify):
+                return "multi_label_classify"
             elif isinstance(m, Pose):
                 return "pose"
             elif isinstance(m, OBB):
@@ -1814,6 +1828,8 @@ def guess_model_task(model):
         model = Path(model)
         if "-seg" in model.stem or "segment" in model.parts:
             return "segment"
+        elif "-cls-multi" in model.stem or "multi_label_classify" in model.parts:
+            return "multi_label_classify"
         elif "-cls" in model.stem or "classify" in model.parts:
             return "classify"
         elif "-pose" in model.stem or "pose" in model.parts:

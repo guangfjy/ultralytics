@@ -91,6 +91,12 @@ class YOLO(Model):
                 "validator": yolo.classify.ClassificationValidator,
                 "predictor": yolo.classify.ClassificationPredictor,
             },
+            "multi_label_classify": {
+                "model": ClassificationModel,
+                "trainer": yolo.classify.MultiLabelClassificationTrainer,
+                "validator": yolo.classify.MultiLabelClassificationValidator,
+                "predictor": yolo.classify.MultiLabelClassificationPredictor,
+            },
             "detect": {
                 "model": DetectionModel,
                 "trainer": yolo.detect.DetectionTrainer,

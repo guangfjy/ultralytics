@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from torcheval.metrics.functional import multilabel_auprc
 
 from ultralytics.utils import LOGGER, DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
 
@@ -1536,6 +1537,58 @@ class ClassifyMetrics(SimpleClass, DataExportMixin):
             >>> print(classify_summary)
         """
         return [{"top1_acc": round(self.top1, decimals), "top5_acc": round(self.top5, decimals)}]
+
+
+class MultiLabelClassifyMetrics(SimpleClass):
+    """Utility class for computing Multi-label Classification metrics such as precision, recall, and macro F1 score."""
+
+    def __init__(self) -> None:
+        """Initialize a Multi-label ClassifyMetrics instance."""
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self.task = "multi_label_classify"
+        self.average_precisions = []
+        self.mAP = 0
+
+    def process(self, targets, pred):
+        """
+        Target classes and predicted classes.
+
+        Args:
+            targets (list): List of target classes.
+            pred (list): List of predicted classes.
+        """
+        batch_targets = targets[0]
+        batch_pred = pred[0]
+        self.average_precisions = multilabel_auprc(batch_pred, batch_targets, average=None)
+        self.mAP = multilabel_auprc(batch_pred, batch_targets, average="macro")
+
+        LOGGER.info(f"Mean Average Precision: {self.mAP}")
+        LOGGER.info("Average Precision for each Class: %s", self.average_precisions)
+
+    @property
+    def fitness(self):
+        """Returns mean of precision, recall and f1 score as fitness score."""
+        return self.mAP
+
+    @property
+    def results_dict(self):
+        """Returns a dictionary with model's performance metrics and fitness score."""
+        return dict(zip(self.keys + ["fitness"], [self.mAP, self.fitness]))
+
+    @property
+    def keys(self):
+        """Returns a list of keys for the results_dict property."""
+        return ["metrics/mAP"]
+
+    @property
+    def curves(self):
+        """Returns a list of curves for accessing specific metrics curves."""
+        return []
+
+    @property
+    def curves_results(self):
+        """Returns a list of curves for accessing specific metrics curves."""
+        return []
 
 
 class OBBMetrics(DetMetrics):
