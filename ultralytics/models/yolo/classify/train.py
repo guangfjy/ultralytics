@@ -15,10 +15,11 @@ from ultralytics.data import (
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import ClassificationModel
-from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
-from ultralytics.utils.plotting import plot_images
+from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK, colorstr
+from ultralytics.utils.plotting import plot_images, plot_results
 from ultralytics.utils.torch_utils import (
     is_parallel,
+    unwrap_model,
     strip_optimizer,
     torch_distributed_zero_first,
 )
@@ -283,9 +284,9 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         ClassificationModel.reshape_outputs(self.model, self.data["nc"])
         return ckpt
 
-    def build_dataset(self, img_path, mode="train", batch=None):
+    def build_dataset(self, img_path: str, mode: str = "train", batch=None):
         """Creates a MultiLabelClassificationDataset instance given an image path, and mode (train/test etc.)."""
-        gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
+        gs = max(int(unwrap_model(self.model).stride.max() if self.model else 0), 32)
         return build_multilabel_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
 
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):

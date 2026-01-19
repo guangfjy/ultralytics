@@ -971,9 +971,9 @@ class v8MultiLabelClassificationLoss:
         Returns:
             (tuple): Tuple containing the classification loss and loss items.
         """
+        preds = preds[1] if isinstance(preds, (list, tuple)) else preds
         loss = F.binary_cross_entropy_with_logits(preds, batch["cls"], reduction="mean")
-        loss_items = loss.detach()
-        return loss, loss_items
+        return loss, loss.detach()
 
 
 class v8OBBLoss(v8DetectionLoss):

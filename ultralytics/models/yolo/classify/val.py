@@ -220,6 +220,7 @@ class ClassificationValidator(BaseValidator):
         )  # pred
 
 
+
 class MultiLabelClassificationValidator(BaseValidator):
     """
     A class extending the BaseValidator class for validation based on a multi-label classification model.
@@ -229,16 +230,23 @@ class MultiLabelClassificationValidator(BaseValidator):
 
     Example:
         ```python
-        from ultralytics.models.yolo.classify import ClassificationValidator
+        from ultralytics.models.yolo.classify import MultiLabelClassificationValidator
 
-        args = dict(model="yolov8n-cls.pt", data="imagenet10")
-        validator = ClassificationValidator(args=args)
+        args = dict(model="yolo11n-cls.pt", data="imagenet10")
+        validator = MultiLabelClassificationValidator(args=args)
         validator()
         ```
     """
 
-    def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None):
-        """Initializes ClassificationValidator instance with args, dataloader, save_dir, and progress bar."""
+    def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None) -> None:
+        """Initializes ClassificationValidator instance with args, dataloader, save_dir, and progress bar.
+
+        Args:
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
+            save_dir (str | Path, optional): Directory to save results.
+            args (dict, optional): Arguments containing model and validation configuration.
+            _callbacks (list, optional): List of callback functions to be called during validation.
+        """
         super().__init__(dataloader, save_dir, pbar, args, _callbacks)
         self.targets = None
         self.pred = None
@@ -246,11 +254,11 @@ class MultiLabelClassificationValidator(BaseValidator):
         self.args.plots = False  # Not plotting for now
         self.metrics = MultiLabelClassifyMetrics()
 
-    def get_desc(self):
-        """Returns a formatted string summarizing classification metrics."""
+    def get_desc(self) -> str:
+        """Return a formatted string summarizing classification metrics."""
         return ("%22s" + "%11s" * 1) % ("classes", "mAP")
 
-    def init_metrics(self, model):
+    def init_metrics(self, model: torch.nn.Module) -> None:
         """Initialize class names, and and metrics."""
         self.names = model.names
         self.nc = len(model.names)
@@ -259,11 +267,11 @@ class MultiLabelClassificationValidator(BaseValidator):
         self.pred = []
         self.targets = []
 
-    def preprocess(self, batch):
-        """Preprocesses input batch and returns it."""
-        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+    def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """Preprocess input batch by moving data to device and converting to appropriate dtype."""
+        batch["img"] = batch["img"].to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()
-        batch["cls"] = batch["cls"].to(self.device)
+        batch["cls"] = batch["cls"].to(self.device, non_blocking=self.device.type == "cuda")
         return batch
 
     def update_metrics(self, preds, batch):
@@ -273,7 +281,7 @@ class MultiLabelClassificationValidator(BaseValidator):
         self.pred.append(preds.type(torch.float32).cpu())  # Append all predictions
         self.targets.append(batch["cls"].type(torch.int32).cpu())
 
-    def finalize_metrics(self, *args, **kwargs):
+    def finalize_metrics(self, *args, **kwargs) -> None:
         """Finalizes metrics of the model such as confusion_matrix and speed."""
         # self.confusion_matrix.process_cls_preds(self.pred, self.targets)
         # if self.args.plots:
@@ -285,8 +293,8 @@ class MultiLabelClassificationValidator(BaseValidator):
         # self.metrics.confusion_matrix = self.confusion_matrix
         self.metrics.save_dir = self.save_dir
 
-    def get_stats(self):
-        """Returns a dictionary of metrics obtained by processing targets and predictions."""
+    def get_stats(self) -> dict[str, float]:
+        """Calculate and return a dictionary of metrics by processing targets and predictions."""
         self.metrics.process(self.targets, self.pred)
         return self.metrics.results_dict
 
@@ -302,7 +310,7 @@ class MultiLabelClassificationValidator(BaseValidator):
         return build_dataloader(dataset, batch_size, self.args.workers, rank=-1)
 
     def print_results(self):
-        """Prints evaluation metrics for YOLO object detection model."""
+        """Print evaluation metrics for YOLO object detection model."""
         pf = "%22s" + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.metrics.mAP))
 
