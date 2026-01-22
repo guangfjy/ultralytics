@@ -222,24 +222,45 @@ class ClassificationValidator(BaseValidator):
 
 
 class MultiLabelClassificationValidator(BaseValidator):
-    """
-    A class extending the BaseValidator class for validation based on a multi-label classification model.
+    """A class extending the BaseValidator class for validation based on a multilabel classification model.
+
+    This validator handles the validation process for multilabel classification models, including metrics calculation, confusion
+    matrix generation, and visualization of results.
+
+    Attributes:
+        targets (list[torch.Tensor]): Ground truth class labels.
+        pred (list[torch.Tensor]): Model predictions.
+        metrics (ClassifyMetrics): Object to calculate and store classification metrics.
+        names (dict): Mapping of class indices to class names.
+        nc (int): Number of classes.
+        confusion_matrix (ConfusionMatrix): Matrix to evaluate model performance across classes.
+
+    Methods:
+        get_desc: Return a formatted string summarizing classification metrics.
+        init_metrics: Initialize confusion matrix, class names, and tracking containers.
+        preprocess: Preprocess input batch by moving data to device.
+        update_metrics: Update running metrics with model predictions and batch targets.
+        finalize_metrics: Finalize metrics including confusion matrix and processing speed.
+        postprocess: Extract the primary prediction from model output.
+        get_stats: Calculate and return a dictionary of metrics.
+        build_dataset: Create a ClassificationDataset instance for validation.
+        get_dataloader: Build and return a data loader for classification validation.
+        print_results: Print evaluation metrics for the classification model.
+        plot_val_samples: Plot validation image samples with their ground truth labels.
+        plot_predictions: Plot images with their predicted class labels.
+
+    Examples:
+        >>> from ultralytics.models.yolo.classify import MultiLabelClassificationValidator
+        >>> args = dict(model="yolo26n-cls.pt", data="imagenet10")
+        >>> validator = MultiLabelClassificationValidator(args=args)
+        >>> validator()
 
     Notes:
-        - Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
-
-    Example:
-        ```python
-        from ultralytics.models.yolo.classify import MultiLabelClassificationValidator
-
-        args = dict(model="yolo11n-cls.pt", data="imagenet10")
-        validator = MultiLabelClassificationValidator(args=args)
-        validator()
-        ```
+        Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
     """
 
-    def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None) -> None:
-        """Initializes ClassificationValidator instance with args, dataloader, save_dir, and progress bar.
+    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks=None) -> None:
+        """Initialize MultiLabelClassificationValidator with dataloader, save directory, and other parameters.
 
         Args:
             dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
@@ -247,7 +268,7 @@ class MultiLabelClassificationValidator(BaseValidator):
             args (dict, optional): Arguments containing model and validation configuration.
             _callbacks (list, optional): List of callback functions to be called during validation.
         """
-        super().__init__(dataloader, save_dir, pbar, args, _callbacks)
+        super().__init__(dataloader, save_dir, args, _callbacks)
         self.targets = None
         self.pred = None
         self.args.task = "multi_label_classify"
@@ -274,15 +295,15 @@ class MultiLabelClassificationValidator(BaseValidator):
         batch["cls"] = batch["cls"].to(self.device, non_blocking=self.device.type == "cuda")
         return batch
 
-    def update_metrics(self, preds, batch):
-        """Updates running metrics with model predictions and batch targets."""
+    def update_metrics(self, preds: torch.Tensor, batch: dict[str, Any]) -> None:
+        """Update running metrics with model predictions and batch targets."""
         # Might Need to update shape here. List will have only one element.
         # Not sure if that's expected or will cause issues with metrics.process()
         self.pred.append(preds.type(torch.float32).cpu())  # Append all predictions
         self.targets.append(batch["cls"].type(torch.int32).cpu())
 
     def finalize_metrics(self, *args, **kwargs) -> None:
-        """Finalizes metrics of the model such as confusion_matrix and speed."""
+        """Finalize metrics including confusion matrix and processing speed."""
         # self.confusion_matrix.process_cls_preds(self.pred, self.targets)
         # if self.args.plots:
         #    for normalize in True, False:

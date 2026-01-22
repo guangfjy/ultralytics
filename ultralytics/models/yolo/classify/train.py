@@ -225,25 +225,25 @@ class ClassificationTrainer(BaseTrainer):
 
 
 class MultiLabelClassificationTrainer(BaseTrainer):
-    """
-    A class extending the BaseTrainer class for training based on a classification model for multi-label classification
-    tasks.
+    """A trainer class extending BaseTrainer for training image multilabel classification models.
 
-    Notes:
-        - Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
 
     Example:
-        ```python
-        from ultralytics.models.yolo.classify import MultiLabelClassificationTrainer
-
-        args = dict(model="yolov8n-cls.pt", data="imagenet10", epochs=3)
-        trainer = MultiLabelClassificationTrainer(overrides=args)
-        trainer.train()
-        ```
+        Initialize and train a multilabel classification model
+        >>> from ultralytics.models.yolo.classify import MultiLabelClassificationTrainer
+        >>> args = dict(model="yolo26n-cls.pt", data="imagenet10", epochs=3)
+        >>> trainer = MultiLabelClassificationTrainer(overrides=args)
+        >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
-        """Initialize a MultiLabelClassificationTrainer object with optional configuration overrides and callbacks."""
+    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks=None):
+        """Initialize a MultiLabelClassificationTrainer object.
+
+        Args:
+            cfg (dict[str, Any], optional): Default configuration dictionary containing training parameters.
+            overrides (dict[str, Any], optional): Dictionary of parameter overrides for the default configuration.
+            _callbacks (list[Any], optional): List of callback functions to be executed during training.
+        """
         if overrides is None:
             overrides = {}
         overrides["task"] = "multi_label_classify"
@@ -255,9 +255,18 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         """Set the YOLO model's class names from the loaded dataset."""
         self.model.names = self.data["names"]
 
-    def get_model(self, cfg=None, weights=None, verbose=True):
-        """Returns a modified PyTorch model configured for training YOLO."""
-        model = ClassificationModel(cfg, nc=self.data["nc"], verbose=verbose and RANK == -1)
+    def get_model(self, cfg=None, weights=None, verbose: bool = True):
+        """Return a modified PyTorch model configured for training YOLO multilabel classification.
+
+        Args:
+            cfg (Any, optional): Model configuration.
+            weights (Any, optional): Pre-trained model weights.
+            verbose (bool, optional): Whether to display model information.
+
+        Returns:
+            (ClassificationModel): Configured PyTorch model for classification.
+        """
+        model = ClassificationModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
         if weights:
             model.load(weights)
 
@@ -271,7 +280,11 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         return model
 
     def setup_model(self):
-        """Load, create or download model for any task."""
+        """Load, create or download model for multilabel classification tasks.
+
+        Returns:
+            (Any): Model checkpoint if applicable, otherwise None.
+        """
         import torchvision  # scope for faster 'import ultralytics'
 
         if str(self.model) in torchvision.models.__dict__:
@@ -285,31 +298,52 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         return ckpt
 
     def build_dataset(self, img_path: str, mode: str = "train", batch=None):
-        """Creates a MultiLabelClassificationDataset instance given an image path, and mode (train/test etc.)."""
+        """Create a MultiLabelClassificationDataset instance given an image path and mode.
+
+        Args:
+            img_path (str): Path to the dataset images.
+            mode (str, optional): Dataset mode ('train', 'val', or 'test').
+            batch (Any, optional): Batch information (unused in this implementation).
+
+        Returns:
+            (YOLOMultiLabelDataset): Dataset for the specified mode.
+        """
         gs = max(int(unwrap_model(self.model).stride.max() if self.model else 0), 32)
         return build_multilabel_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
 
-    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
-        """Returns PyTorch DataLoader with transforms to preprocess images for inference."""
+    def get_dataloader(self, dataset_path: str, batch_size: int = 16, rank: int = 0, mode: str = "train"):
+        """Return PyTorch DataLoader with transforms to preprocess images.
+
+        Args:
+            dataset_path (str): Path to the dataset.
+            batch_size (int, optional): Number of images per batch.
+            rank (int, optional): Process rank for distributed training.
+            mode (str, optional): 'train', 'val', or 'test' mode.
+
+        Returns:
+            (torch.utils.data.DataLoader): DataLoader for the specified dataset and mode.
+        """
         assert mode in {"train", "val"}, f"Mode must be 'train' or 'val', not {mode}."
         with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
             dataset = self.build_dataset(dataset_path, batch=batch_size, mode=mode)
-        loader = build_dataloader(dataset, batch_size, self.args.workers, rank=rank)
+
+        loader = build_dataloader(dataset, batch_size, self.args.workers, rank=rank, drop_last=self.args.compile)
+        # Attach inference transforms
         if mode != "train":
             if is_parallel(self.model):
-                self.model.module.transforms = loader.dataset.build_transforms()
+                self.model.module.transforms = loader.dataset.torch_transforms
             else:
-                self.model.transforms = loader.dataset.build_transforms()
-        return loader  # build_dataloader(dataset, batch_size, workers, shuffle, rank)  # return dataloader
+                self.model.transforms = loader.dataset.torch_transforms
+        return loader
 
-    def preprocess_batch(self, batch):
-        """Preprocesses a batch of images and classes."""
-        batch["img"] = batch["img"].to(self.device)
-        batch["cls"] = batch["cls"].to(self.device)
+    def preprocess_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Preprocess a batch of images and classes."""
+        batch["img"] = batch["img"].to(self.device, non_blocking=self.device.type == "cuda")
+        batch["cls"] = batch["cls"].to(self.device, non_blocking=self.device.type == "cuda")
         return batch
 
-    def progress_string(self):
-        """Returns a formatted string showing training progress."""
+    def progress_string(self) -> str:
+        """Return a formatted string showing training progress."""
         return ("\n" + "%11s" * (4 + len(self.loss_names))) % (
             "Epoch",
             "GPU_mem",
@@ -319,15 +353,14 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         )
 
     def get_validator(self):
-        """Returns an instance of ClassificationValidator for validation."""
+        """Return an instance of ClassificationValidator for validation."""
         self.loss_names = ["loss"]
         return yolo.classify.MultiLabelClassificationValidator(
-            self.test_loader, self.save_dir, _callbacks=self.callbacks
+            self.test_loader, self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )
 
-    def label_loss_items(self, loss_items=None, prefix="train"):
-        """
-        Returns a loss dict with labelled training loss items tensor.
+    def label_loss_items(self, loss_items: torch.Tensor | None = None, prefix: str = "train"):
+        """Return a loss dict with labeled training loss items tensor.
 
         Not needed for classification but necessary for segmentation & detection
         """
@@ -337,8 +370,18 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         loss_items = [round(float(loss_items), 5)]
         return dict(zip(keys, loss_items))
 
+    def plot_training_samples(self, batch: dict[str, torch.Tensor], ni: int):
+        """Plot training samples with their annotations."""
+        plot_images(
+            images=batch["img"],
+            batch_idx=torch.arange(len(batch["img"])),
+            cls=batch["cls"].view(-1),  # warning: use .view(), not .squeeze() for Classify models
+            fname=self.save_dir / f"train_batch{ni}.jpg",
+            on_plot=self.on_plot,
+        )
+
     def plot_metrics(self):
-        """Plots metrics from a CSV file."""
+        """Plot metrics from a CSV file."""
         plot_results(file=self.csv, classify=True, on_plot=self.on_plot)  # save results.png
 
     def final_eval(self):
@@ -354,13 +397,3 @@ class MultiLabelClassificationTrainer(BaseTrainer):
                     self.metrics.pop("fitness", None)
                     self.run_callbacks("on_fit_epoch_end")
         LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}")
-
-    def plot_training_samples(self, batch, ni):
-        """Plots training samples with their annotations."""
-        plot_images(
-            images=batch["img"],
-            batch_idx=torch.arange(len(batch["img"])),
-            cls=batch["cls"].view(-1),  # warning: use .view(), not .squeeze() for Classify models
-            fname=self.save_dir / f"train_batch{ni}.jpg",
-            on_plot=self.on_plot,
-        )
