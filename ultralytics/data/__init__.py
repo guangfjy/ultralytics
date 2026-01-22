@@ -6,7 +6,6 @@ from .build import (
     build_grounding,
     build_yolo_dataset,
     load_inference_source,
-    build_multilabel_dataset,
 )
 from .dataset import (
     ClassificationDataset,
@@ -22,7 +21,6 @@ __all__ = (
     "BaseDataset",
     "ClassificationDataset",
     "YOLOMultiLabelDataset",
-    "build_multilabel_dataset",
     "GroundingDataset",
     "SemanticDataset",
     "YOLOConcatDataset",

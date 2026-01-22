@@ -846,7 +846,7 @@ class YOLOMultiLabelDataset(BaseDataset):
         (torch.utils.data.Dataset): A PyTorch dataset object that can be used for training an object detection model.
     """
 
-    def __init__(self, *args, data=None, augment=False, task="multi_label_classify", **kwargs):
+    def __init__(self, *args, data=None, task="multi_label_classify", **kwargs):
         """Initializes the YOLODataset with optional configurations for segments and keypoints."""
         self.data = data
         self.use_keypoints = False

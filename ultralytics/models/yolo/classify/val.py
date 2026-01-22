@@ -11,7 +11,7 @@ import torch.distributed as dist
 from ultralytics.data import (
     ClassificationDataset,
     build_dataloader,
-    build_multilabel_dataset,
+    build_yolo_dataset,
 )
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, RANK
@@ -323,7 +323,7 @@ class MultiLabelClassificationValidator(BaseValidator):
         """Creates and returns a multi label classification dataset instance using given image path and preprocessing
         parameters.
         """
-        return build_multilabel_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val")
+        return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val")
 
     def get_dataloader(self, dataset_path, batch_size):
         """Builds and returns a data loader for classification tasks with given parameters."""

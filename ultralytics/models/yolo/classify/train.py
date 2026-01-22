@@ -10,7 +10,7 @@ import torch
 from ultralytics.data import (
     ClassificationDataset,
     build_dataloader,
-    build_multilabel_dataset,
+    build_yolo_dataset,
 )
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
@@ -309,7 +309,7 @@ class MultiLabelClassificationTrainer(BaseTrainer):
             (YOLOMultiLabelDataset): Dataset for the specified mode.
         """
         gs = max(int(unwrap_model(self.model).stride.max() if self.model else 0), 32)
-        return build_multilabel_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
+        return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
 
     def get_dataloader(self, dataset_path: str, batch_size: int = 16, rank: int = 0, mode: str = "train"):
         """Return PyTorch DataLoader with transforms to preprocess images.
