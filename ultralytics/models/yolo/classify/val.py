@@ -333,7 +333,7 @@ class MultiLabelClassificationValidator(BaseValidator):
     def print_results(self):
         """Print evaluation metrics for YOLO object detection model."""
         pf = "%22s" + "%11.3g" * len(self.metrics.keys)  # print format
-        LOGGER.info(pf % ("all", self.metrics.mAP))
+        LOGGER.info(pf % ("all", self.metrics.mAP, self.metrics.coverage))
 
     def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
         """Plot validation image samples with their ground truth labels.

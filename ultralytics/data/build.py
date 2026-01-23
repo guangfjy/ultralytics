@@ -254,6 +254,7 @@ def build_yolo_dataset(
         fraction=cfg.fraction if mode == "train" else 1.0,
     )
 
+
 def build_grounding(
     cfg: IterableSimpleNamespace,
     img_path: str,

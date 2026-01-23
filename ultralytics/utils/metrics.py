@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from torcheval.metrics.functional import multilabel_auprc
+from torcheval.metrics.functional import multilabel_auprc, multilabel_accuracy
 
 from ultralytics.utils import LOGGER, DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
 
@@ -1548,6 +1548,7 @@ class MultiLabelClassifyMetrics(SimpleClass):
         self.task = "multi_label_classify"
         self.average_precisions = []
         self.mAP = 0
+        self.coverage = 0
 
     def process(self, targets, pred):
         """
@@ -1557,13 +1558,15 @@ class MultiLabelClassifyMetrics(SimpleClass):
             targets (list): List of target classes.
             pred (list): List of predicted classes.
         """
-        batch_targets = targets[0]
-        batch_pred = pred[0]
+        batch_targets = targets[0]  # (N, C), {0,1}
+        batch_pred = pred[0]  # (N, C), prob
         self.average_precisions = multilabel_auprc(batch_pred, batch_targets, average=None)
         self.mAP = multilabel_auprc(batch_pred, batch_targets, average="macro")
+        self.coverage = multilabel_accuracy(batch_targets, batch_pred, threshold=0.5, criteria='contain')
 
         LOGGER.info(f"Mean Average Precision: {self.mAP}")
         LOGGER.info("Average Precision for each Class: %s", self.average_precisions)
+        LOGGER.info(f"Label Coverage Rate: {self.coverage}")
 
     @property
     def fitness(self):
@@ -1573,12 +1576,12 @@ class MultiLabelClassifyMetrics(SimpleClass):
     @property
     def results_dict(self):
         """Returns a dictionary with model's performance metrics and fitness score."""
-        return dict(zip(self.keys + ["fitness"], [self.mAP, self.fitness]))
+        return dict(zip(self.keys + ["fitness"], [self.mAP, self.coverage, self.fitness]))
 
     @property
     def keys(self):
         """Returns a list of keys for the results_dict property."""
-        return ["metrics/mAP"]
+        return ["metrics/mAP", "metrics/coverage"]
 
     @property
     def curves(self):
