@@ -838,39 +838,61 @@ class YOLOMultiLabelDataset(BaseDataset):
     """
     Dataset class for loading multi-label classification labels in YOLO format.
 
-    Args:
-        data (dict, optional): A dataset YAML dictionary. Defaults to None.
-        task (str): An explicit arg to point current task, Defaults to 'multi_label_classify'.
+    Attributes:
+        use_segments (bool): Indicates if segmentation masks should be used.
+        use_keypoints (bool): Indicates if keypoints should be used for pose estimation.
+        use_obb (bool): Indicates if oriented bounding boxes should be used.
+        data (dict): Dataset configuration dictionary.
 
-    Returns:
-        (torch.utils.data.Dataset): A PyTorch dataset object that can be used for training an object detection model.
+    Methods:
+        cache_labels: Cache dataset labels, check images and read shapes.
+        get_labels: Return dictionary of labels for YOLO training.
+        build_transforms: Build and append transforms to the list.
+        close_mosaic: Set mosaic, copy_paste and mixup options to 0.0 and build transformations.
+        update_labels_info: Update label format for different tasks.
+        collate_fn: Collate data samples into batches.
+
+    Examples:
+        >>> dataset = YOLODataset(img_path="path/to/images", data={"names": {0: "person"}}, task="detect")
+        >>> dataset.get_labels()
     """
 
-    def __init__(self, *args, data=None, task="multi_label_classify", **kwargs):
-        """Initializes the YOLODataset with optional configurations for segments and keypoints."""
-        self.data = data
-        self.use_keypoints = False
-        self.task = task
-        self.use_segments = False
-        self.use_obb = False
-        self.hyp = kwargs["hyp"]
-        self.multi_label = True
-        super().__init__(*args, **kwargs)
-
-    def cache_labels(self, path=Path("./labels.cache")):
-        """
-        Cache dataset labels, check images and read shapes.
+    def __init__(self, *args, data: dict | None = None, task: str = "multi_label_classify", **kwargs):
+        """Initialize the YOLODataset.
 
         Args:
-            path (Path): Path where to save the cache file. Default is Path('./labels.cache').
+            data (dict, optional): Dataset configuration dictionary.
+            task (str): Task type, one of 'detect', 'segment', 'pose', or 'obb'.
+            *args (Any): Additional positional arguments for the parent class.
+            **kwargs (Any): Additional keyword arguments for the parent class.
+        """
+        self.use_segments = task == "segment"
+        self.use_keypoints = task == "pose"
+        self.use_obb = task == "obb"
+        self.multi_label = task == "multi_label_classify"
+        self.data = data
+        assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
+        super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
+
+    def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
+        """Cache dataset labels, check images and read shapes.
+
+        Args:
+            path (Path): Path where to save the cache file.
 
         Returns:
-            (dict): labels.
+            (dict): Dictionary containing cached labels and related information.
         """
         x = {"labels": []}
         nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number missing, found, empty, corrupt, messages
         desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
         total = len(self.im_files)
+        nkpt, ndim = self.data.get("kpt_shape", (0, 0))
+        if self.use_keypoints and (nkpt <= 0 or ndim not in {2, 3}):
+            raise ValueError(
+                "'kpt_shape' in data.yaml missing or incorrect. Should be a list with [number of "
+                "keypoints, number of dims (2 for x,y or 3 for x,y,visible)], i.e. 'kpt_shape: [17, 3]'"
+            )
         with ThreadPool(NUM_THREADS) as pool:
             results = pool.imap(
                 func=verify_image_label,
@@ -880,8 +902,8 @@ class YOLOMultiLabelDataset(BaseDataset):
                     repeat(self.prefix),
                     repeat(self.use_keypoints),
                     repeat(len(self.data["names"])),
-                    repeat(0),
-                    repeat(0),
+                    repeat(nkpt),
+                    repeat(ndim),
                     repeat(self.single_cls),
                     repeat(self.multi_label),
                 ),
@@ -913,22 +935,28 @@ class YOLOMultiLabelDataset(BaseDataset):
         if msgs:
             LOGGER.info("\n".join(msgs))
         if nf == 0:
-            LOGGER.warning(f"{self.prefix}WARNING ⚠️ No labels found in {path}. {HELP_URL}")
+            LOGGER.warning(f"{self.prefix}No labels found in {path}. {HELP_URL}")
         x["hash"] = get_hash(self.label_files + self.im_files)
         x["results"] = nf, nm, ne, nc, len(self.im_files)
         x["msgs"] = msgs  # warnings
         save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
         return x
 
-    def get_labels(self):
-        """Return dictionary of labels for YOLO training."""
+    def get_labels(self) -> list[dict]:
+        """Return dictionary of labels for YOLO training.
+
+        This method loads labels from disk or cache, verifies their integrity, and prepares them for training.
+
+        Returns:
+            (list[dict]): List of label dictionaries, each containing information about an image and its annotations.
+        """
         self.label_files = img2label_paths(self.im_files)
         cache_path = Path(self.label_files[0]).parent.with_suffix(".cache")
         try:
             cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
             assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
             assert cache["hash"] == get_hash(self.label_files + self.im_files)  # identical hash
-        except (FileNotFoundError, AssertionError, AttributeError):
+        except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError):
             cache, exists = self.cache_labels(cache_path), False  # run cache ops
 
         # Display cache
@@ -943,7 +971,9 @@ class YOLOMultiLabelDataset(BaseDataset):
         [cache.pop(k) for k in ("hash", "version", "msgs")]  # remove items
         labels = cache["labels"]
         if not labels:
-            LOGGER.warning(f"WARNING ⚠️ No images found in {cache_path}, training may not work correctly. {HELP_URL}")
+            raise RuntimeError(
+                f"No valid images found in {cache_path}. Images with incorrectly formatted labels are ignored. {HELP_URL}"
+            )
         self.im_files = [lb["im_file"] for lb in labels]  # update im_files
 
         # Check if the dataset is all boxes or all segments
@@ -951,35 +981,42 @@ class YOLOMultiLabelDataset(BaseDataset):
         len_cls, len_boxes, len_segments = (sum(x) for x in zip(*lengths))
         if len_segments and len_boxes != len_segments:
             LOGGER.warning(
-                f"WARNING ⚠️ Box and segment counts should be equal, but got len(segments) = {len_segments}, "
+                f"Box and segment counts should be equal, but got len(segments) = {len_segments}, "
                 f"len(boxes) = {len_boxes}. To resolve this only boxes will be used and all segments will be removed. "
                 "To avoid this please supply either a detect or segment dataset, not a detect-segment mixed dataset."
             )
             for lb in labels:
                 lb["segments"] = []
         if len_cls == 0:
-            LOGGER.warning(f"WARNING ⚠️ No labels found in {cache_path}, training may not work correctly. {HELP_URL}")
+            LOGGER.warning(f"Labels are missing or empty in {cache_path}, training may not work correctly. {HELP_URL}")
         return labels
 
-    def build_transforms(self, hyp=None):
-        scale = (1.0 - self.hyp.scale, 1.0)
-        torch_transforms = (
+    def build_transforms(self, hyp: dict | None = None) -> Compose:
+        """Build and append transforms to the list.
+
+        Args:
+            hyp (dict, optional): Hyperparameters for transforms.
+
+        Returns:
+            (Compose): Composed transforms.
+        """
+        transforms = (
             classify_augmentations(
                 size=self.imgsz,
-                scale=scale,
-                hflip=self.hyp.fliplr,
-                vflip=self.hyp.flipud,
-                erasing=self.hyp.erasing,
-                auto_augment=self.hyp.auto_augment,
-                hsv_h=self.hyp.hsv_h,
-                hsv_s=self.hyp.hsv_s,
-                hsv_v=self.hyp.hsv_v,
+                scale=(1.0 - hyp.scale, 1.0),  # change scale into a range
+                hflip=hyp.fliplr,
+                vflip=hyp.flipud,
+                erasing=hyp.erasing,
+                auto_augment=hyp.auto_augment,
+                hsv_h=hyp.hsv_h,
+                hsv_s=hyp.hsv_s,
+                hsv_v=hyp.hsv_v,
             )
             if self.augment
-            else classify_transforms(size=self.imgsz, crop_fraction=self.hyp.crop_fraction)
+            else classify_transforms(size=self.imgsz)
         )
 
-        return torch_transforms
+        return transforms
 
     def __getitem__(self, index):
         """Needed to override this method otherwise data is returned incorrectly."""
@@ -989,33 +1026,44 @@ class YOLOMultiLabelDataset(BaseDataset):
         transformed_image = self.transforms(sample_image)
         return {"img": transformed_image, "cls": current_data["cls"]}
 
-    def close_mosaic(self, hyp):
-        """Sets mosaic, copy_paste and mixup options to 0.0 and builds transformations."""
-        # @TODO: Can remove these I think. But not sure.
-        self.hyp.mosaic = 0.0  # set mosaic ratio=0.0
-        self.hyp.copy_paste = 0.0  # keep the same behavior as previous v8 close-mosaic
-        self.hyp.mixup = 0.0  # keep the same behavior as previous v8 close-mosaic
-        self.transforms = self.build_transforms(self.hyp)
+    def close_mosaic(self, hyp: dict) -> None:
+        """Disable mosaic, copy_paste, mixup and cutmix augmentations by setting their probabilities to 0.0.
 
-    def update_labels_info(self, label):
+        Args:
+            hyp (dict): Hyperparameters for transforms.
         """
-        Custom your label format here.
+        hyp.mosaic = 0.0
+        hyp.copy_paste = 0.0
+        hyp.mixup = 0.0
+        hyp.cutmix = 0.0
+        self.transforms = self.build_transforms(hyp)
 
-        Note:
+    def update_labels_info(self, label: dict) -> dict:
+        """Update label format for different tasks.
+
+        Args:
+            label (dict): Label dictionary containing bboxes, segments, keypoints, etc.
+
+        Returns:
+            (dict): Updated label dictionary with instances.
+
+        Notes:
             cls is not with bboxes now, classification and semantic segmentation need an independent cls label
             Can also support classification and semantic segmentation by adding or removing dict keys there.
         """
-        label.pop("bboxes")  # np.array([[0, 0, 640, 640]])
+        bboxes = label.pop("bboxes")
         segments = label.pop("segments", [])
-        label.pop("keypoints", None)
-        label.pop("bbox_format")
-        label.pop("normalized")
+        keypoints = label.pop("keypoints", None)
+        bbox_format = label.pop("bbox_format")
+        normalized = label.pop("normalized")
         current_classes = label.pop("cls")
         # NOTE: do NOT resample oriented boxes
         segment_resamples = 100 if self.use_obb else 1000
         if len(segments) > 0:
-            # list[np.array(1000, 2)] * num_samples
-            # (N, 1000, 2)
+            # make sure segments interpolate correctly if original length is greater than segment_resamples
+            max_len = max(len(s) for s in segments)
+            segment_resamples = (max_len + 1) if segment_resamples < max_len else segment_resamples
+            # list[np.array(segment_resamples, 2)] * num_samples
             segments = np.stack(resample_segments(segments, n=segment_resamples), axis=0)
         else:
             segments = np.zeros((0, segment_resamples, 2), dtype=np.float32)

@@ -227,6 +227,28 @@ class ClassificationTrainer(BaseTrainer):
 class MultiLabelClassificationTrainer(BaseTrainer):
     """A trainer class extending BaseTrainer for training image multilabel classification models.
 
+    This trainer handles the training process for image multilabel classification tasks, supporting both YOLO classification models
+    and torchvision models with comprehensive dataset handling and validation.
+
+    Attributes:
+        model (ClassificationModel): The classification model to be trained.
+        data (dict[str, Any]): Dictionary containing dataset information including class names and number of classes.
+        loss_names (list[str]): Names of the loss functions used during training.
+        validator (ClassificationValidator): Validator instance for model evaluation.
+
+    Methods:
+        set_model_attributes: Set the model's class names from the loaded dataset.
+        get_model: Return a modified PyTorch model configured for training.
+        setup_model: Load, create or download model for classification.
+        build_dataset: Create a ClassificationDataset instance.
+        get_dataloader: Return PyTorch DataLoader with transforms for image preprocessing.
+        preprocess_batch: Preprocess a batch of images and classes.
+        progress_string: Return a formatted string showing training progress.
+        get_validator: Return an instance of ClassificationValidator.
+        label_loss_items: Return a loss dict with labeled training loss items.
+        final_eval: Evaluate trained model and save validation results.
+        plot_training_samples: Plot training samples with their annotations.
+
 
     Example:
         Initialize and train a multilabel classification model
@@ -325,15 +347,15 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         """
         assert mode in {"train", "val"}, f"Mode must be 'train' or 'val', not {mode}."
         with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
-            dataset = self.build_dataset(dataset_path, batch=batch_size, mode=mode)
+            dataset = self.build_dataset(dataset_path, mode, batch_size)
 
         loader = build_dataloader(dataset, batch_size, self.args.workers, rank=rank, drop_last=self.args.compile)
         # Attach inference transforms
         if mode != "train":
             if is_parallel(self.model):
-                self.model.module.transforms = loader.dataset.torch_transforms
+                self.model.module.transforms = loader.dataset.transforms
             else:
-                self.model.transforms = loader.dataset.torch_transforms
+                self.model.transforms = loader.dataset.transforms
         return loader
 
     def preprocess_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -362,6 +384,14 @@ class MultiLabelClassificationTrainer(BaseTrainer):
     def label_loss_items(self, loss_items: torch.Tensor | None = None, prefix: str = "train"):
         """Return a loss dict with labeled training loss items tensor.
 
+        Args:
+            loss_items (torch.Tensor, optional): Loss tensor items.
+            prefix (str, optional): Prefix to prepend to loss names.
+
+        Returns:
+            keys (list[str]): List of loss keys if loss_items is None.
+            loss_dict (dict[str, float]): Dictionary of loss items if loss_items is provided.
+
         Not needed for classification but necessary for segmentation & detection
         """
         keys = [f"{prefix}/{x}" for x in self.loss_names]
@@ -371,18 +401,22 @@ class MultiLabelClassificationTrainer(BaseTrainer):
         return dict(zip(keys, loss_items))
 
     def plot_training_samples(self, batch: dict[str, torch.Tensor], ni: int):
-        """Plot training samples with their annotations."""
+        """Plot training samples with their annotations.
+
+        Args:
+            batch (dict[str, torch.Tensor]): Batch containing images and class labels.
+            ni (int): Number of iterations.
+        """
+        batch["batch_idx"] = torch.arange(batch["img"].shape[0])  # add batch index for plotting
         plot_images(
-            images=batch["img"],
-            batch_idx=torch.arange(len(batch["img"])),
-            cls=batch["cls"].view(-1),  # warning: use .view(), not .squeeze() for Classify models
+            labels=batch,
             fname=self.save_dir / f"train_batch{ni}.jpg",
             on_plot=self.on_plot,
         )
 
     def plot_metrics(self):
         """Plot metrics from a CSV file."""
-        plot_results(file=self.csv, classify=True, on_plot=self.on_plot)  # save results.png
+        plot_results(file=self.csv, on_plot=self.on_plot)  # save results.png
 
     def final_eval(self):
         """Evaluate trained model and save validation results."""

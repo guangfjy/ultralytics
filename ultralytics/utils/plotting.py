@@ -796,11 +796,28 @@ def plot_images(
                         annotator.box_label(box, label, color=color)
 
             elif len(classes):
-                for c in classes:
-                    color = colors(c)
-                    c = names.get(c, c) if names else c
-                    label = f"{c}" if labels else f"{c} {conf[0]:.1f}"
-                    annotator.text([x, y], label, txt_color=color, box_color=(64, 64, 64, 128))
+                if cls.ndim == 2:  # multi-label
+                    scores = cls[i]  # shape (C,)
+                    active = np.where(scores > 0.5)[0]
+                    if active.size == 0:
+                        continue
+
+                    for j, c in enumerate(active):
+                        color = colors(c)
+                        name = names.get(c, c) if names else c
+                        if confs is not None:
+                            score = confs[i, c] if confs.ndim == 2 else confs[i]
+                            label = f"{name} {score:.2f}"
+                        else:
+                            label = f"{name}"
+                        annotator.text([x, y + j * 28], label, txt_color=color, box_color=(64, 64, 64, 128))
+
+                else:  # multi-class
+                    for c in classes:
+                        color = colors(c)
+                        c = names.get(c, c) if names else c
+                        label = f"{c}" if labels else f"{c} {conf[0]:.1f}"
+                        annotator.text([x, y], label, txt_color=color, box_color=(64, 64, 64, 128))
 
             # Plot keypoints
             if len(kpts):

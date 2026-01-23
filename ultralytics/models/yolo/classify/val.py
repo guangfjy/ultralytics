@@ -335,12 +335,21 @@ class MultiLabelClassificationValidator(BaseValidator):
         pf = "%22s" + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.metrics.mAP))
 
-    def plot_val_samples(self, batch, ni):
-        """Plot validation image samples."""
+    def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
+        """Plot validation image samples with their ground truth labels.
+
+        Args:
+            batch (dict[str, Any]): Dictionary containing batch data with 'img' (images) and 'cls' (class labels).
+            ni (int): Batch index used for naming the output file.
+
+        Examples:
+            >>> validator = MultiLabelClassificationValidator()
+            >>> batch = {"img": torch.rand(16, 3, 224, 224), "cls": torch.randint(0, 10, (16,))}
+            >>> validator.plot_val_samples(batch, 0)
+        """
+        batch["batch_idx"] = torch.arange(batch["img"].shape[0])  # add batch index for plotting
         plot_images(
-            images=batch["img"],
-            batch_idx=torch.arange(len(batch["img"])),
-            cls=batch["cls"].view(-1),  # warning: use .view(), not .squeeze() for Classify models
+            labels=batch,
             fname=self.save_dir / f"val_batch{ni}_labels.jpg",
             names=self.names,
             on_plot=self.on_plot,
