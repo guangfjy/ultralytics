@@ -19,7 +19,15 @@ keywords: Ultralytics, YOLO, Detection, Pose, RTDETRDecoder, nn modules, guides
 
 <br><br><hr><br>
 
+## ::: ultralytics.nn.modules.head.Segment26
+
+<br><br><hr><br>
+
 ## ::: ultralytics.nn.modules.head.OBB
+
+<br><br><hr><br>
+
+## ::: ultralytics.nn.modules.head.OBB26
 
 <br><br><hr><br>
 
@@ -27,7 +35,15 @@ keywords: Ultralytics, YOLO, Detection, Pose, RTDETRDecoder, nn modules, guides
 
 <br><br><hr><br>
 
+## ::: ultralytics.nn.modules.head.Pose26
+
+<br><br><hr><br>
+
 ## ::: ultralytics.nn.modules.head.Classify
+
+<br><br><hr><br>
+
+## ::: ultralytics.nn.modules.head.MultiLabelClassify
 
 <br><br><hr><br>
 
@@ -44,6 +60,10 @@ keywords: Ultralytics, YOLO, Detection, Pose, RTDETRDecoder, nn modules, guides
 <br><br><hr><br>
 
 ## ::: ultralytics.nn.modules.head.YOLOESegment
+
+<br><br><hr><br>
+
+## ::: ultralytics.nn.modules.head.YOLOESegment26
 
 <br><br><hr><br>
 

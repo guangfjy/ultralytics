@@ -8,10 +8,14 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
-from ultralytics.data import ClassificationDataset, build_dataloader
+from ultralytics.data import (
+    ClassificationDataset,
+    build_dataloader,
+    build_yolo_dataset,
+)
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, RANK
-from ultralytics.utils.metrics import ClassifyMetrics, ConfusionMatrix
+from ultralytics.utils.metrics import ClassifyMetrics, ConfusionMatrix, MultiLabelClassifyMetrics
 from ultralytics.utils.plotting import plot_images
 
 
@@ -45,7 +49,7 @@ class ClassificationValidator(BaseValidator):
 
     Examples:
         >>> from ultralytics.models.yolo.classify import ClassificationValidator
-        >>> args = dict(model="yolo11n-cls.pt", data="imagenet10")
+        >>> args = dict(model="yolo26n-cls.pt", data="imagenet10")
         >>> validator = ClassificationValidator(args=args)
         >>> validator()
 
@@ -214,3 +218,139 @@ class ClassificationValidator(BaseValidator):
             names=self.names,
             on_plot=self.on_plot,
         )  # pred
+
+
+
+class MultiLabelClassificationValidator(BaseValidator):
+    """A class extending the BaseValidator class for validation based on a multilabel classification model.
+
+    This validator handles the validation process for multilabel classification models, including metrics calculation, confusion
+    matrix generation, and visualization of results.
+
+    Attributes:
+        targets (list[torch.Tensor]): Ground truth class labels.
+        pred (list[torch.Tensor]): Model predictions.
+        metrics (ClassifyMetrics): Object to calculate and store classification metrics.
+        names (dict): Mapping of class indices to class names.
+        nc (int): Number of classes.
+        confusion_matrix (ConfusionMatrix): Matrix to evaluate model performance across classes.
+
+    Methods:
+        get_desc: Return a formatted string summarizing classification metrics.
+        init_metrics: Initialize confusion matrix, class names, and tracking containers.
+        preprocess: Preprocess input batch by moving data to device.
+        update_metrics: Update running metrics with model predictions and batch targets.
+        finalize_metrics: Finalize metrics including confusion matrix and processing speed.
+        postprocess: Extract the primary prediction from model output.
+        get_stats: Calculate and return a dictionary of metrics.
+        build_dataset: Create a ClassificationDataset instance for validation.
+        get_dataloader: Build and return a data loader for classification validation.
+        print_results: Print evaluation metrics for the classification model.
+        plot_val_samples: Plot validation image samples with their ground truth labels.
+        plot_predictions: Plot images with their predicted class labels.
+
+    Examples:
+        >>> from ultralytics.models.yolo.classify import MultiLabelClassificationValidator
+        >>> args = dict(model="yolo26n-cls.pt", data="imagenet10")
+        >>> validator = MultiLabelClassificationValidator(args=args)
+        >>> validator()
+
+    Notes:
+        Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
+    """
+
+    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks=None) -> None:
+        """Initialize MultiLabelClassificationValidator with dataloader, save directory, and other parameters.
+
+        Args:
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
+            save_dir (str | Path, optional): Directory to save results.
+            args (dict, optional): Arguments containing model and validation configuration.
+            _callbacks (list, optional): List of callback functions to be called during validation.
+        """
+        super().__init__(dataloader, save_dir, args, _callbacks)
+        self.targets = None
+        self.pred = None
+        self.args.task = "multi_label_classify"
+        self.args.plots = False  # Not plotting for now
+        self.metrics = MultiLabelClassifyMetrics()
+
+    def get_desc(self) -> str:
+        """Return a formatted string summarizing classification metrics."""
+        return ("%22s" + "%11s" * 1) % ("classes", "mAP")
+
+    def init_metrics(self, model: torch.nn.Module) -> None:
+        """Initialize class names, and and metrics."""
+        self.names = model.names
+        self.nc = len(model.names)
+
+        # self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf, task="multi_label_classify")
+        self.pred = []
+        self.targets = []
+
+    def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """Preprocess input batch by moving data to device and converting to appropriate dtype."""
+        batch["img"] = batch["img"].to(self.device, non_blocking=self.device.type == "cuda")
+        batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()
+        batch["cls"] = batch["cls"].to(self.device, non_blocking=self.device.type == "cuda")
+        return batch
+
+    def update_metrics(self, preds: torch.Tensor, batch: dict[str, Any]) -> None:
+        """Update running metrics with model predictions and batch targets."""
+        # Might Need to update shape here. List will have only one element.
+        # Not sure if that's expected or will cause issues with metrics.process()
+        self.pred.append(preds.type(torch.float32).cpu())  # Append all predictions
+        self.targets.append(batch["cls"].type(torch.int32).cpu())
+
+    def finalize_metrics(self, *args, **kwargs) -> None:
+        """Finalize metrics including confusion matrix and processing speed."""
+        # self.confusion_matrix.process_cls_preds(self.pred, self.targets)
+        # if self.args.plots:
+        #    for normalize in True, False:
+        #        self.confusion_matrix.plot(
+        #            save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
+        #        )
+        self.metrics.speed = self.speed
+        # self.metrics.confusion_matrix = self.confusion_matrix
+        self.metrics.save_dir = self.save_dir
+
+    def get_stats(self) -> dict[str, float]:
+        """Calculate and return a dictionary of metrics by processing targets and predictions."""
+        self.metrics.process(self.targets, self.pred)
+        return self.metrics.results_dict
+
+    def build_dataset(self, img_path, mode="val", batch=None):
+        """Creates and returns a multi label classification dataset instance using given image path and preprocessing
+        parameters.
+        """
+        return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val")
+
+    def get_dataloader(self, dataset_path, batch_size):
+        """Builds and returns a data loader for classification tasks with given parameters."""
+        dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
+        return build_dataloader(dataset, batch_size, self.args.workers, rank=-1)
+
+    def print_results(self):
+        """Print evaluation metrics for YOLO object detection model."""
+        pf = "%22s" + "%11.3g" * len(self.metrics.keys)  # print format
+        LOGGER.info(pf % ("all", self.metrics.mAP, self.metrics.coverage))
+
+    def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
+        """Plot validation image samples with their ground truth labels.
+
+        Args:
+            batch (dict[str, Any]): Dictionary containing batch data with 'img' (images) and 'cls' (class labels).
+            ni (int): Batch index used for naming the output file.
+
+        Examples:
+            >>> validator = MultiLabelClassificationValidator()
+            >>> batch = {"img": torch.rand(16, 3, 224, 224), "cls": torch.randint(0, 10, (16,))}
+            >>> validator.plot_val_samples(batch, 0)
+        """
+        batch["batch_idx"] = torch.arange(batch["img"].shape[0])  # add batch index for plotting
+        plot_images(
+            labels=batch,
+            fname=self.save_dir / f"val_batch{ni}_labels.jpg",
+            names=self.names,
+            on_plot=self.on_plot,
+        )

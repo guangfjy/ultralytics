@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from torcheval.metrics.functional import multilabel_auprc, multilabel_accuracy
 
 from ultralytics.utils import LOGGER, DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
 
@@ -21,6 +22,7 @@ OKS_SIGMA = (
     )
     / 10.0
 )
+RLE_WEIGHT = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.2, 1.5, 1.5, 1.0, 1.0, 1.2, 1.2, 1.5, 1.5])
 
 
 def bbox_ioa(box1: np.ndarray, box2: np.ndarray, iou: bool = False, eps: float = 1e-7) -> np.ndarray:
@@ -315,7 +317,7 @@ class ConfusionMatrix(DataExportMixin):
         matches (dict): Contains the indices of ground truths and predictions categorized into TP, FP and FN.
     """
 
-    def __init__(self, names: dict[int, str] = [], task: str = "detect", save_matches: bool = False):
+    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False):
         """Initialize a ConfusionMatrix instance.
 
         Args:
@@ -529,7 +531,9 @@ class ConfusionMatrix(DataExportMixin):
         btm = max(0.1, 0.25 - 0.001 * nc)  # Minimum value is 0.1
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
-            im = ax.imshow(array, cmap="Blues", vmin=0.0, interpolation="none")
+            cmap = plt.cm.Blues.copy()
+            cmap.set_bad(color="#f7f7f7")  # set background color for nan
+            im = ax.imshow(array, cmap=cmap, vmin=0.0, interpolation="none")
             ax.xaxis.set_label_position("bottom")
             if nc < 30:  # Add score for each cell of confusion matrix
                 color_threshold = 0.45 * (1 if normalize else np.nanmax(array))  # text color threshold
@@ -1533,6 +1537,61 @@ class ClassifyMetrics(SimpleClass, DataExportMixin):
             >>> print(classify_summary)
         """
         return [{"top1_acc": round(self.top1, decimals), "top5_acc": round(self.top5, decimals)}]
+
+
+class MultiLabelClassifyMetrics(SimpleClass):
+    """Utility class for computing Multi-label Classification metrics such as precision, recall, and macro F1 score."""
+
+    def __init__(self) -> None:
+        """Initialize a Multi-label ClassifyMetrics instance."""
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self.task = "multi_label_classify"
+        self.average_precisions = []
+        self.mAP = 0
+        self.coverage = 0
+
+    def process(self, targets, pred):
+        """
+        Target classes and predicted classes.
+
+        Args:
+            targets (list): List of target classes.
+            pred (list): List of predicted classes.
+        """
+        batch_targets = targets[0]  # (N, C), {0,1}
+        batch_pred = pred[0]  # (N, C), prob
+        self.average_precisions = multilabel_auprc(batch_pred, batch_targets, average=None)
+        self.mAP = multilabel_auprc(batch_pred, batch_targets, average="macro")
+        self.coverage = multilabel_accuracy(batch_targets, batch_pred, threshold=0.5, criteria='contain')
+
+        LOGGER.info(f"Mean Average Precision: {self.mAP}")
+        LOGGER.info("Average Precision for each Class: %s", self.average_precisions)
+        LOGGER.info(f"Label Coverage Rate: {self.coverage}")
+
+    @property
+    def fitness(self):
+        """Returns mean of precision, recall and f1 score as fitness score."""
+        return self.mAP
+
+    @property
+    def results_dict(self):
+        """Returns a dictionary with model's performance metrics and fitness score."""
+        return dict(zip(self.keys + ["fitness"], [self.mAP, self.coverage, self.fitness]))
+
+    @property
+    def keys(self):
+        """Returns a list of keys for the results_dict property."""
+        return ["metrics/mAP", "metrics/coverage"]
+
+    @property
+    def curves(self):
+        """Returns a list of curves for accessing specific metrics curves."""
+        return []
+
+    @property
+    def curves_results(self):
+        """Returns a list of curves for accessing specific metrics curves."""
+        return []
 
 
 class OBBMetrics(DetMetrics):

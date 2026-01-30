@@ -37,8 +37,8 @@ from ultralytics.utils.downloads import download, safe_download, unzip_file
 from ultralytics.utils.ops import segments2boxes
 
 HELP_URL = "See https://docs.ultralytics.com/datasets for dataset formatting guidance."
-IMG_FORMATS = {"bmp", "dng", "jpeg", "jpg", "mpo", "png", "tif", "tiff", "webp", "pfm", "heic"}  # image suffixes
-VID_FORMATS = {"asf", "avi", "gif", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ts", "wmv", "webm"}  # video suffixes
+IMG_FORMATS = {"avif", "bmp", "dng", "heic", "jp2", "jpeg", "jpeg2000", "jpg", "mpo", "png", "tif", "tiff", "webp"}
+VID_FORMATS = {"asf", "avi", "gif", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ts", "wmv", "webm"}  # videos
 FORMATS_HELP_MSG = f"Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
 
 
@@ -178,8 +178,16 @@ def verify_image(args: tuple) -> tuple:
 
 
 def verify_image_label(args: tuple) -> list:
-    """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
+    """Verify one image-label pair.
+
+    Added support for multi_label classification.
+    """
+    if len(args) == 9:
+        im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls, multi_label = args
+    else:
+        im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
+        multi_label = False
+
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
@@ -202,21 +210,31 @@ def verify_image_label(args: tuple) -> list:
             nf = 1  # label found
             with open(lb_file, encoding="utf-8") as f:
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
+                if multi_label:
+                    # Only Want first column because this represents classes
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
-                    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
-                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+                    lb = classes.reshape(-1, 1)
+
+                else:
+                    if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
+                        classes = np.array([x[0] for x in lb], dtype=np.float32)
+                        segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                        lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32)
             if nl := len(lb):
-                if keypoint:
-                    assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
-                    points = lb[:, 5:].reshape(-1, ndim)[:, :2]
+                if multi_label:
+                    # Multi label classification only needs one column in dataset
+                    assert lb.shape[1] == 1, f"labels require 1 column, {lb.shape[1]} columns detected"
                 else:
-                    assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
-                    points = lb[:, 1:]
-                # Coordinate points check with 1% tolerance
-                assert points.max() <= 1.01, f"non-normalized or out of bounds coordinates {points[points > 1.01]}"
-                assert lb.min() >= -0.01, f"negative class labels or coordinate {lb[lb < -0.01]}"
+                    if keypoint:
+                        assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
+                        points = lb[:, 5:].reshape(-1, ndim)[:, :2]
+                    else:
+                        assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
+                        points = lb[:, 1:]
+                    # Coordinate points check with 1% tolerance
+                    assert points.max() <= 1.01, f"non-normalized or out of bounds coordinates {points[points > 1.01]}"
+                    assert lb.min() >= -0.01, f"negative class labels or coordinate {lb[lb < -0.01]}"
 
                 # All labels
                 max_cls = 0 if single_cls else lb[:, 0].max()  # max label count

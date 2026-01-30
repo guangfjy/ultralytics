@@ -5,7 +5,7 @@ from unittest import mock
 
 import torch
 
-from tests import MODEL
+from tests import MODEL, SOURCE
 from ultralytics import YOLO
 from ultralytics.cfg import get_cfg
 from ultralytics.engine.exporter import Exporter
@@ -23,13 +23,13 @@ def test_export():
     exporter = Exporter()
     exporter.add_callback("on_export_start", test_func)
     assert test_func in exporter.callbacks["on_export_start"], "callback test failed"
-    f = exporter(model=YOLO("yolo11n.yaml").model)
-    YOLO(f)(ASSETS)  # exported model inference
+    f = exporter(model=YOLO("yolo26n.yaml").model)
+    YOLO(f)(SOURCE)  # exported model inference
 
 
 def test_detect():
     """Test YOLO object detection training, validation, and prediction functionality."""
-    overrides = {"data": "coco8.yaml", "model": "yolo11n.yaml", "imgsz": 32, "epochs": 1, "save": False}
+    overrides = {"data": "coco8.yaml", "model": "yolo26n.yaml", "imgsz": 32, "epochs": 1, "save": False}
     cfg = get_cfg(DEFAULT_CFG)
     cfg.data = "coco8.yaml"
     cfg.imgsz = 32
@@ -71,7 +71,7 @@ def test_segment():
     """Test image segmentation training, validation, and prediction pipelines using YOLO models."""
     overrides = {
         "data": "coco8-seg.yaml",
-        "model": "yolo11n-seg.yaml",
+        "model": "yolo26n-seg.yaml",
         "imgsz": 32,
         "epochs": 1,
         "save": False,
@@ -98,7 +98,7 @@ def test_segment():
     pred = segment.SegmentationPredictor(overrides={"imgsz": [64, 64]})
     pred.add_callback("on_predict_start", test_func)
     assert test_func in pred.callbacks["on_predict_start"], "callback test failed"
-    result = pred(source=ASSETS, model=WEIGHTS_DIR / "yolo11n-seg.pt")
+    result = pred(source=ASSETS, model=WEIGHTS_DIR / "yolo26n-seg.pt")
     assert len(result), "predictor test failed"
 
     # Test resume functionality
@@ -115,7 +115,7 @@ def test_segment():
 
 def test_classify():
     """Test image classification including training, validation, and prediction phases."""
-    overrides = {"data": "imagenet10", "model": "yolo11n-cls.yaml", "imgsz": 32, "epochs": 1, "save": False}
+    overrides = {"data": "imagenet10", "model": "yolo26n-cls.yaml", "imgsz": 32, "epochs": 1, "save": False}
     cfg = get_cfg(DEFAULT_CFG)
     cfg.data = "imagenet10"
     cfg.imgsz = 32
@@ -150,8 +150,36 @@ def test_nan_recovery():
             trainer.tloss *= torch.tensor(float("nan"))
             nan_injected[0] = True
 
-    overrides = {"data": "coco8.yaml", "model": "yolo11n.yaml", "imgsz": 32, "epochs": 3}
+    overrides = {"data": "coco8.yaml", "model": "yolo26n.yaml", "imgsz": 32, "epochs": 3}
     trainer = detect.DetectionTrainer(overrides=overrides)
     trainer.add_callback("on_train_batch_end", inject_nan)
     trainer.train()
     assert nan_injected[0], "NaN injection failed"
+
+
+def test_multi_label_classify():
+    """Test multi-label classification."""
+    overrides = {"data": "coco8-multi.yaml", "model": "yolov8-cls-multi.yaml", "imgsz": 32, "epochs": 1, "save": False}
+    cfg = get_cfg(DEFAULT_CFG)
+    cfg.data = "coco8-multi.yaml"
+    cfg.imgsz = 32
+    # YOLO(CFG_SEG).train(**overrides)  # works
+
+    # Trainer
+    trainer = classify.MultiLabelClassificationTrainer(overrides=overrides)
+    trainer.add_callback("on_train_start", test_func)
+    assert test_func in trainer.callbacks["on_train_start"], "callback test failed"
+    trainer.train()
+
+    # Validator
+    val = classify.MultiLabelClassificationValidator(args=cfg)
+    val.add_callback("on_val_start", test_func)
+    assert test_func in val.callbacks["on_val_start"], "callback test failed"
+    val(model=trainer.best)
+
+    # Predictor
+    pred = classify.MultiLabelClassificationPredictor(overrides={"imgsz": [64, 64]})
+    pred.add_callback("on_predict_start", test_func)
+    assert test_func in pred.callbacks["on_predict_start"], "callback test failed"
+    result = pred(source=ASSETS, model=trainer.best)
+    assert len(result), "predictor test failed"
